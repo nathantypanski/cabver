@@ -33,9 +33,6 @@ def build_args():
 
 def _match_package_information(pkg_text):
     """Match package information for use in get_available_version_list()."""
-    def split_and_sort_versions(pkg, name):
-        pkg[name] = [LooseVersion(ver) for ver in pkg[name].split(', ')]
-        pkg[name].sort()
 
     pkg_match = {
         'name':      re.compile(r'.\s([a-zA-Z][a-zA-Z-\d]*)'),
@@ -51,12 +48,15 @@ def _match_package_information(pkg_text):
                     pkg[name] = regex.match(line).group(1)
                 except AttributeError:
                     pass
-    split_and_sort_versions(pkg, 'installed')
+
+    pkg['installed'] = [LooseVersion(ver) for ver in pkg['installed'].split(', ')]
+    pkg['installed'].sort()
     pkg['available'] = LooseVersion(pkg['available'])
     return pkg
 
 
 def get_package_list():
+    """Get a list of packages from Cabal."""
     cabal_args = ['cabal', 'list', '--installed']
     cabal = subprocess.check_output(cabal_args, universal_newlines=True)
     packages = [pkg.split('\n') for pkg in cabal.strip().split('\n\n')]
@@ -67,26 +67,6 @@ def get_package_list():
         package_info_map.append(pkg)
     package_info_map.sort(key=lambda x: x['name'])
     return package_info_map
-
-
-def has_newer_version(pkg):
-    latest = pkg['available']
-    installed = pkg['installed'][-1]
-    try:
-        if installed < latest:
-            return pkg['available']
-    except TypeError as e:
-        # bad version string
-        # (e.g., "Not available from any configured repository")
-        return False
-
-
-def get_new_packages(packages):
-    new_available = []
-    for pkg in packages:
-        if has_newer_version(pkg):
-            new_available.append(pkg)
-    return new_available
 
 
 def display_packages(packages,
@@ -119,15 +99,32 @@ def display_packages(packages,
                 print('{}: {}'.format(pkg['name'], installed))
 
 
-def old(packages):
-    """Convert a collated list of packages into a list of only old packages."""
+def has_newer_version(pkg):
+    """If pkg has a newer version available, return that version number."""
+    latest = pkg['available']
+    installed = pkg['installed'][-1]
+    try:
+        if installed < latest:
+            return pkg['available']
+    except TypeError:
+        # bad version string
+        # (e.g., "Not available from any configured repository")
+        return False
+
+
+def filter_new_available(packages):
+    """Return only those packages which have newer versions available."""
+    return [pkg for pkg in packages if has_newer_version(pkg)]
+
+
+def filter_multiple_installed(packages):
+    """Get those packages with more than one installed version."""
     return [pkg for pkg in packages if len(pkg['installed']) > 1]
 
 
-def filter_packages(packages, names):
+def filter_by_names(packages, names):
     """Filter the packages to only those ones contained in names."""
-    names = set(names)
-    return [pkg for pkg in packages if pkg['name'] in names]
+    return [pkg for pkg in packages if pkg['name'] in set(names)]
 
 
 def validate_args(args):
@@ -146,15 +143,15 @@ def main():
     args = args_parser.parse_args()
     validate_args(args)
     if args.installed:
-        packages = filter_packages(get_package_list(), args.installed)
+        packages = filter_by_names(get_package_list(), args.installed)
     else:
         packages = get_package_list()
 
     if args.multiple:
-        packages = old(packages)
+        packages = filter_multiple_installed(packages)
 
     if args.new_versions:
-        packages = get_new_packages(packages)
+        packages = filter_new_available(packages)
 
     display_packages(packages, args.version_separator, args.id, args.new_versions)
 
