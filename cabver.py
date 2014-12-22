@@ -5,6 +5,7 @@ from distutils.version import LooseVersion
 import collections
 import subprocess
 import sys
+import re
 
 
 def build_args():
@@ -19,6 +20,7 @@ def build_args():
                            ' this will list only old versions of installed'
                            ' packages.' ,
                       action='store_true', default=False)
+    args.add_argument('-n', '--new-versions', action='store_true')
     display = args.add_argument_group('display options')
     display.add_argument('--version-separator',
                          help='separate version numbers with SEP.'
@@ -44,10 +46,50 @@ def get_package_list():
     package_list = [pkg.split(' ') for pkg in cabal.strip('\n').split('\n')]
     package_map = collections.defaultdict(list)
     for name, version in package_list:
-        package_map[name].append(version)
+        package_map[name].append(LooseVersion(version))
     package_list = [(name, versions) for name, versions in package_map.items()]
     package_list.sort(key=lambda x: x[0])
+    for _, versions in package_list:
+        versions.sort()
     return package_list
+
+
+def _match_package_information(pkg_text):
+    """Match package information for use in get_available_version_list()."""
+    def split_and_sort_versions(pkg, name):
+        pkg[name] = [LooseVersion(ver) for ver in pkg[name].split(', ')]
+        pkg[name].sort()
+
+    pkg_match = {
+        'name':      re.compile(r'.\s([a-zA-Z][a-zA-Z-\d]*)'),
+        'available': re.compile(r'\s+Default available version: (.*)$'),
+        'installed': re.compile(r'\s+Installed versions: (.*)$'),
+    }
+
+    pkg = {}
+    for line in pkg_text:
+        for name, regex in pkg_match.items():
+            if name not in pkg:
+                try:
+                    pkg[name] = regex.match(line).group(1)
+                except AttributeError:
+                    pass
+    split_and_sort_versions(pkg, 'installed')
+    split_and_sort_versions(pkg, 'available')
+    return pkg
+
+
+def get_available_version_list():
+    cabal_args = ['cabal', 'list', '--installed']
+    cabal = subprocess.check_output(cabal_args, universal_newlines=True)
+    packages = [pkg.split('\n') for pkg in cabal.strip().split('\n\n')]
+
+    package_info_map = []
+    for pkg_text in packages:
+        pkg = _match_package_information(pkg_text)
+        package_info_map.append(pkg)
+    package_info_map.sort(key=lambda x: x['name'])
+    print(package_info_map)
 
 
 def display_packages(packages, version_separator=None, id_form=False):
@@ -98,19 +140,20 @@ def main():
     args_parser = build_args()
     args = args_parser.parse_args()
     validate_args(args)
-    if args.installed is not None:
-        if args.installed:
-            packages = filter_packages(get_package_list(), args.installed)
-        else:
-            packages = get_package_list()
+    if args.installed:
+        packages = filter_packages(get_package_list(), args.installed)
+    else:
+        packages = get_package_list()
 
-        if args.old:
-            packages = old(packages)
+    if args.old:
+        packages = old(packages)
 
+    if args.new_versions:
+        get_available_version_list()
+    else:
         display_packages(packages, args.version_separator, args.id)
 
-    else:
-        args_parser.print_help()
+    # args_parser.print_help()
 
 if __name__ == '__main__':
     main()
