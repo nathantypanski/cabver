@@ -6,6 +6,11 @@ Quick script to make parsing the output of [cabal](https://www.haskell.org/cabal
 
 Because `ghc-pkg` does a poor job of formatting its output for use in scripts. I usually have two questions when I first query my GHC package database:
 
+1. What are my duplicate packages?
+2. Which packages have new upstream releases?
+
+I didn't have a good way to answer this. Now I do.
+
 ## Usage
 
 To show installed packages:
